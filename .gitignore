@@ -1,207 +1,351 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
-*.py[codz]
-*$py.class
 
-# C extensions
-*.so
 
-# Distribution / packaging
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# PyInstaller
-#  Usually these files are written by a python script from a template
-#  before PyInstaller builds the exe, so as to inject date/other infos into it.
-*.manifest
-*.spec
+import math
+import numpy as np
+from google.colab import auth
+import gspread
+from google.auth import default
 
-# Installer logs
-pip-log.txt
-pip-delete-this-directory.txt
+# Access authentication
+try:
+    auth.authenticate_user()
+    creds, _ = default()
+    gc = gspread.authorize(creds)
+except Exception as e:
+    print("Google authentication error:", e)
 
-# Unit test / coverage reports
-htmlcov/
-.tox/
-.nox/
-.coverage
-.coverage.*
-.cache
-nosetests.xml
-coverage.xml
-*.cover
-*.py.cover
-.hypothesis/
-.pytest_cache/
-cover/
+# ===================================================================
+# Step 1: Developing the support function ( Equations )
+# ===================================================================
+# ===================================================================
 
-# Translations
-*.mo
-*.pot
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
+W_TOTAL = 2.5        # Total Shelf Space (m2)
+COST_CS = 1000.0     # Electricity + cooling cost (VND/m2/day)
+EPSILON = 0.1        # Step used in calculation
+def create_item(name, E, sigma, A, L, U, alpha, beta, p, pd, ca, ch, Co):
+    return {
+        'name': name,
+        'E_i': E,          # Expiration date
+        'sigma_i': sigma,  # Volatility
+        'A_i': A / 10000.0, # Convert cm2 to m2 (Assuming Excel A_i is in cm2)
+        'L_i': L,          # Lower bound facings
+        'U_i': U,          # Upper bound facings
+        'alpha_i': alpha,  # Demand parameter alpha
+        'beta_i': beta,    # Space elasticity beta
+        'p_i': p,          # Selling price
+        'pd_i': pd,        # Discounted price
+        'ca_i': ca,        # Acquisition cost
+        'ch_i': ch,        # Holding cost
+        'Co_i': Co,        # Ordering cost
+        'c_s': COST_CS     # Shared Global Parameter
+    }
 
-# Flask stuff:
-instance/
-.webassets-cache
+SHEET_URL = 'https://docs.google.com/spreadsheets/d/1S9q7HA8HHxP5f0UUJltxgsaapmPCYoKMFOsTbcvFS20/edit?gid=0#gid=0'
+all_items_params = []
+try:
+    wb = gc.open_by_url(SHEET_URL)
+    worksheet = wb.sheet1
 
-# Scrapy stuff:
-.scrapy
+    rows = worksheet.get_all_records()
 
-# Sphinx documentation
-docs/_build/
 
-# PyBuilder
-.pybuilder/
-target/
+    for index, row in enumerate(rows):
+        try:
+            # Column name handling: Remove extra spaces (e.g. 'E_i ' -> 'E_i')
+            clean_row = {k.strip(): v for k, v in row.items()}
 
-# Jupyter Notebook
-.ipynb_checkpoints
+            # Skip note in my Sheet
+            if not str(clean_row['name']) or str(clean_row['name']).startswith('('):
+                continue
 
-# IPython
-profile_default/
-ipython_config.py
+            # Input data from Google Sheet
+            item = create_item(
+                name  = str(clean_row['name']),
+                E     = int(clean_row['E_i']),
+                sigma = float(clean_row['sigma_i']),
+                A     = float(clean_row['A_i']),
+                L     = int(clean_row['L_i']),
+                U     = int(clean_row['U_i']),
+                alpha = float(clean_row['alpha_i']),
+                beta  = float(clean_row['beta_i']),
+                p     = float(clean_row['p_i']),
+                pd    = float(clean_row['pd_i']),
+                ca    = float(clean_row['ca_i']),
+                ch    = float(clean_row['ch_i']),
+                Co    = float(clean_row['Co_i'])
+            )
+            all_items_params.append(item)
 
-# pyenv
-#   For a library or package, you might want to ignore these files since the code is
-#   intended to run in multiple environments; otherwise, check them in:
-# .python-version
+        except ValueError:
+            continue
+        except KeyError as ke:
+            break
 
-# pipenv
-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.
-#   However, in case of collaboration, if having platform-specific dependencies or dependencies
-#   having no cross-platform support, pipenv may install dependencies that don't work, or not
-#   install all needed dependencies.
-#Pipfile.lock
+except Exception as e:
+    print("="*40)
+    print("Sheet connection error:", e)
+    print("="*40)
 
-# UV
-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#uv.lock
 
-# poetry
-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.
-#   This is especially recommended for binary packages to ensure reproducibility, and is more
-#   commonly ignored for libraries.
-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control
-#poetry.lock
-#poetry.toml
+def calculate_q_ub(s, r, params):
+   B = params['beta_i']
+   a = params['alpha_i']
+   sig = params['sigma_i']
+   T_e = params['E_i']
 
-# pdm
-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.
-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.
-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control
-#pdm.lock
-#pdm.toml
-.pdm-python
-.pdm-build/
 
-# pixi
-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.
-#pixi.lock
-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one
-#   in the .venv directory. It is recommended not to include this directory in version control.
-.pixi
 
-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
-__pypackages__/
 
-# Celery stuff
-celerybeat-schedule
-celerybeat.pid
 
-# SageMath parsed files
-*.sage.py
 
-# Environments
-.env
-.envrc
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
 
-# Spyder project settings
-.spyderproject
-.spyproject
+   # Solving case r = 0 to avoid math.pow(0, <1)
+   if r == 0:
+       term1 = 0
+   else:
+       term1 = (math.pow(r, 1 - B) * math.pow(s, B)) / (1 - B)
 
-# Rope project settings
-.ropeproject
 
-# mkdocs documentation
-/site
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
 
-# Pyre type checker
-.pyre/
+   term2 = (a / sig) * math.pow(s, B)
+   term3 = (B / (1 - B)) * s
+   term4 = (a / sig) * math.exp(-sig * T_e) * math.pow(s, B)
 
-# pytype static type analyzer
-.pytype/
 
-# Cython debug symbols
-cython_debug/
 
-# PyCharm
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
 
-# Abstra
-# Abstra is an AI-powered process automation framework.
-# Ignore directories containing user credentials, local state, and settings.
-# Learn more at https://abstra.io/docs
-.abstra/
+   #  Calculate q_ub
+   q_ub = math.floor(term1 + term2 - term3 - term4)
+   return int(q_ub)
 
-# Visual Studio Code
-#  Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore 
-#  that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore
-#  and can be added to the global gitignore or merged into this file. However, if you prefer, 
-#  you could uncomment the following to ignore the entire vscode folder
-# .vscode/
 
-# Ruff stuff:
-.ruff_cache/
 
-# PyPI configuration file
-.pypirc
 
-# Cursor
-#  Cursor is an AI-powered code editor. `.cursorignore` specifies files/directories to
-#  exclude from AI features like autocomplete and code analysis. Recommended for sensitive data
-#  refer to https://docs.cursor.com/context/ignore-files
-.cursorignore
-.cursorindexingignore
 
-# Marimo
-marimo/_static/
-marimo/_lsp/
-__marimo__/
+
+def calculate_helper_vars(q, s, r, params):
+   try:
+       B = params['beta_i']
+       a = params['alpha_i']
+       sig = params['sigma_i']
+       ch = params['ch_i']
+       # --- Calculate t1i ---
+       log_arg_t1i = ((s - q) * sig / (a * math.pow(s, B))) + 1
+       if log_arg_t1i <= 0:
+           return None
+       t1i = -(1 / sig) * math.log(log_arg_t1i)
+       # --- Calculate the value of K ---
+       K = math.pow(s, 1 - B) - (a * (1 - B) / sig) * math.exp(-sig * t1i)
+       # --- Calculate Ti ---
+       r_pow = 0 if r == 0 else math.pow(r, 1 - B)
+       log_arg_Ti = ((r_pow - K) * sig) / (a * (1 - B))
+       if log_arg_Ti <= 0:
+           return None
+       Ti = -(1 / sig) * math.log(log_arg_Ti)
+       # --- Check constraints 0 < Ti <= Ei ---
+       if not (0 < Ti <= params['E_i']):
+           return None
+       # --- Calculate HC1  ---
+       C = (a * math.pow(s, B)) / sig
+       HC1 = ch * ((q - C) * t1i - (C / sig) * (math.exp(-sig * t1i) - 1))
+       # --- Calculte HC2  ---
+       HC2 = ch * (s + r) * (Ti - t1i) / 2.0
+       return {
+           'T_i': Ti,
+           'HC1_i': HC1,
+           'HC2_i': HC2
+       }
+
+   except (ValueError, OverflowError):
+       return None
+
+def calculate_M(q, s, r, params):
+   # Get the value (Ti, HC1, HC2)
+   helper_vars = calculate_helper_vars(q, s, r, params)
+
+   if helper_vars is None:
+       return -float('inf')
+
+   Ti = helper_vars['T_i']
+   HC1 = helper_vars['HC1_i']
+   HC2 = helper_vars['HC2_i']
+   p = params['p_i']
+   pd = params['pd_i']
+   ca = params['ca_i']
+   Co = params['Co_i']
+   cs = params['c_s']
+   A = params.get('A_i', 1.0)
+
+   if Ti == 0:
+       return -float('inf')
+   # Calculate the Profit
+   profit_per_cycle = p * (q - r) + pd * r - ca * q - Co - HC1 - HC2
+   avg_profit = profit_per_cycle / Ti
+   # Shelf cost
+   shelf_cost = cs * s * A
+   M = avg_profit - shelf_cost
+   return M
+# ===================================================================
+# STEP 3: DEVELOP proc_qr(s')
+# ===================================================================
+def proc_qr(s_prime, params, epsilon=0.001):
+   s = s_prime
+   q_opt_final = 0
+   r_opt_final = 0
+   M_opt_final = -float('inf')
+   for r in range(s + 1):
+       q_l = s
+       q_r = calculate_q_ub(s, r, params)
+       if q_r < q_l:
+           continue
+       M_l = calculate_M(q_l, s, r, params)
+       M_r = calculate_M(q_r, s, r, params)
+       while (q_r - q_l > 1):
+           q = (q_l + q_r) // 2
+           if q == q_l or q == q_r:
+               break
+           M = calculate_M(q, s, r, params)
+           M_prev = calculate_M(q - epsilon, s, r, params)
+           if (M_prev < M):
+               q_l = q
+               M_l = M
+           else:
+               q_r = q
+               M_r = M
+           print("\n")
+       if (M_l < M_r):
+           q_opt_r = q_r
+           M_opt_r = M_r
+       else:
+           q_opt_r = q_l
+           M_opt_r = M_l
+       if (M_opt_final < M_opt_r):
+           M_opt_final = M_opt_r
+           q_opt_final = q_opt_r
+           r_opt_final = r
+   return M_opt_final, q_opt_final, r_opt_final
+# ===================================================================
+# STEP 3: DEFINE F2
+# ===================================================================
+def calculate_F2(s, params):
+   # Cannot add if s is maximum
+   if s > params['U_i']:
+       return -np.inf
+   # Cannot calculate M(s-1) if s is minimum
+   if s < params['L_i']:
+       return -np.inf
+   # Get Profit M at s
+   M_s, _, _ = proc_qr(s, params)
+
+   # Get Profit M at s-1
+   M_s_minus_1, _, _ = proc_qr(s - 1, params)
+
+   # Solve case M(s-1) is the profit of 0 facings (NA)
+   if s == params['L_i'] and M_s_minus_1 == -np.inf:
+       M_s_minus_1 = 0.0  # Assume the profit is 0 if there are no facings
+
+   if M_s == -np.inf or M_s_minus_1 == -np.inf:
+       return -np.inf  # NA
+
+   A_j = params['A_i']
+   if A_j == 0: return np.inf  # Avoid divide to 0
+
+   # Additional profit per unit of space
+   return (M_s - M_s_minus_1) / A_j
+
+# ===================================================================
+# STEP 4: DEVELOP GH_3 (Greedy Derivative_Fwd)
+# ===================================================================
+
+def gh3_solve(items_params_list, W_total):
+   n_items = len(items_params_list)
+
+   s_solution = [0] * n_items
+
+   f2_values = [0.0] * n_items
+
+   current_space = 0.0
+
+   for i in range(n_items):
+       params = items_params_list[i]
+       L_i = params['L_i']
+       A_j = params['A_i']
+       s_solution[i] = L_i
+       current_space += L_i * A_j
+       # Calculate F2 for adding the next facings (At s = L_i + 1)
+       f2_values[i] = calculate_F2(L_i + 1, params)
+   free_space = W_total - current_space
+   print(f"Used Space: {current_space:.4f}. Available Space: {free_space:.4f}")
+   while True:
+       best_f2_value = -np.inf
+       best_item_index = -1
+       for i in range(n_items):
+           if f2_values[i] > best_f2_value:
+               best_f2_value = f2_values[i]
+               best_item_index = i
+       # --- Stop Condition ---
+       # 1. No item can add
+       if best_item_index == -1 or best_f2_value == -float('inf'):
+           break
+       params_j = items_params_list[best_item_index]
+       A_j = params_j['A_i']  # Space Requirement for 1 facing
+       # 2. Not enough available space
+       if free_space < A_j:
+           f2_values[best_item_index] = -float('inf')
+           continue
+       # --- Adding facing ---
+       # Add 1 facing for item j
+       s_solution[best_item_index] += 1
+       s_current = s_solution[best_item_index]
+       # Update Space
+       current_space += A_j
+       free_space -= A_j
+       # Update F2 value for item j
+       # Compute F2 for adding the *next* facing (at s = s_current + 1)
+       f2_values[best_item_index] = calculate_F2(s_current + 1, params_j)
+   print("\n Calculate Total Final Profit...")
+   total_profit = 0.0
+   final_q_r = []  # Save (q, r)
+   for i in range(n_items):
+       s_final = s_solution[i]
+       params = items_params_list[i]
+       M, q, r = proc_qr(s_final, params)
+       if M != -np.inf:
+           total_profit += M
+       final_q_r.append({'M':M,'q': q, 'r': r})
+   return s_solution, final_q_r, total_profit, current_space
+# ===================================================================
+# STEP 4: RUN MODEL
+# ===================================================================
+
+
+
+print("=====================================================")
+
+
+
+
+# Run Model
+solution_s, final_q_r, total_profit, final_space = gh3_solve(all_items_params, W_TOTAL)
+
+
+
+
+print("=====================================================")
+print("--- THE FINAL RESULT GH_3 ---")
+print("\nThe Shelf Allocation (s_i):")
+print(f"{'Item':<10} | {'s':<3} | {'q':<4} | {'r':<3} | {'M (Profit)':<10} | {'Space':<10}")
+print("-" * 60)
+for i in range(len(solution_s)):
+    q_r = final_q_r[i]
+    space_used = solution_s[i] * all_items_params[i]['A_i']
+    print(f"{all_items_params[i]['name']:<10} | {solution_s[i]:<3} | {q_r['q']:<4} | {q_r['r']:<3} | {q_r['M']:<10.2f} | {space_used:.4f}")
+print(f"Total Profit: {total_profit:.5f} (in thousands VND)")
+print(f"Total Used Space: {final_space:.5f} / {W_TOTAL} (m^2) (Utilization: {final_space/W_TOTAL*100:.1f}%)")
+print("=====================================================")
+
+
+
